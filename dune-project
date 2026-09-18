@@ -19,7 +19,7 @@
  (name dolphinc)
  (synopsis "A short synopsis")
  (description "A longer description")
- (depends ocaml)
+ (depends ocaml yojson)
  (tags
   ("add topics" "to describe" your project)))
 
