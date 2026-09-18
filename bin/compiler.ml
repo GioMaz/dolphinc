@@ -1,3 +1,5 @@
-exception Unimplemented
+open Semant
 
-let compile_prog_from_ast _ = raise Unimplemented
+let compile_prog_from_ast p =
+    let _ = typecheck_prog p in
+    None
