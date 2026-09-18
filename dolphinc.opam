@@ -14,6 +14,8 @@ depends: [
   "ocaml"
   "odoc" {with-doc}
   "yojson"
+  "cmdliner"
+  "ppx_yojson_conv_lib"
 ]
 build: [
   ["dune" "subst"] {dev}

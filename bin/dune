@@ -1,4 +1,4 @@
 (executable
  (public_name dolphinc)
  (name main)
- (libraries dolphinc yojson))
+ (libraries dolphinc yojson cmdliner ppx_yojson_conv_lib))
