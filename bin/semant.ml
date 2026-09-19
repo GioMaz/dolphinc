@@ -41,8 +41,13 @@ let rec infertype_expr env expr =
   | Ast.Boolean { bool } -> (TAst.Boolean {bool = bool}, TAst.Bool)
 
   | Ast.BinOp { left; op; right } -> (
-      (* TODO: consider returning TAst.TypeError in case of type error *)
       match op with
+
+      (*
+         E |- left <= Int  E |- right <= Int
+         -----------------------------------
+              E |- left + right => Int
+      *)
       | Ast.Plus | Ast.Minus | Ast.Mul | Ast.Div | Ast.Rem ->
           let texpr1, typ1 = typecheck_expr env left TAst.Int in
           let texpr2, typ2 = typecheck_expr env right TAst.Int in
@@ -50,6 +55,12 @@ let rec infertype_expr env expr =
             TAst.BinOp {left = texpr1; op = (tbinop_of_binop op); right = texpr2; tp = typ},
             typ
           )
+
+      (*
+         E |- left <= Int  E |- right <= Int
+         -----------------------------------
+              E |- left < right => Bool
+      *)
       | Ast.Lt | Ast.Le | Ast.Gt | Ast.Ge ->
           let texpr1, typ1 = typecheck_expr env left TAst.Int in
           let texpr2, typ2 = typecheck_expr env right TAst.Int in
@@ -57,6 +68,12 @@ let rec infertype_expr env expr =
             TAst.BinOp {left = texpr1; op = (tbinop_of_binop op); right = texpr2; tp = typ},
             typ
           )
+
+      (*
+         E |- left <= Bool  E |- right <= Bool
+         -------------------------------------
+              E |- left || right => Bool
+      *)
       | Ast.Lor | Ast.Land ->
           let texpr1, typ1 = typecheck_expr env left TAst.Bool in
           let texpr2, typ2 = typecheck_expr env right TAst.Bool in
@@ -64,6 +81,12 @@ let rec infertype_expr env expr =
             TAst.BinOp {left = texpr1; op = (tbinop_of_binop op); right = texpr2; tp = typ},
             typ
           )
+
+      (*
+         E |- left => A  E |- right <= A
+         -------------------------------
+           E |- left == right => Bool
+      *)
       | Ast.Eq | Ast.NEq ->
           let texpr1, typ1 = infertype_expr env left in
           let texpr2, typ2 = typecheck_expr env right typ1 in 
@@ -75,11 +98,22 @@ let rec infertype_expr env expr =
 
     | Ast.UnOp { op; operand } -> (
         match op with
+        (*
+           E |- expr <= Int
+           -----------------
+           E |- -expr => Int
+        *)
         | Ast.Neg ->
             let texpr, typ = typecheck_expr env operand TAst.Int in (
               TAst.UnOp {op = (tunop_of_unop op); operand = texpr; tp = typ},
               typ
             )
+
+        (*
+           E |- expr <= Bool
+           ------------------
+           E |- !expr => Bool
+        *)
         | Ast.Lnot ->
             let texpr, typ = typecheck_expr env operand TAst.Bool in (
               TAst.UnOp {op = (tunop_of_unop op); operand = texpr; tp = typ},
@@ -97,19 +131,47 @@ let rec infertype_expr env expr =
           typ2
         )
 
-    | Ast.Call { fname; args } -> raise Unimplemented
+    (*
+       f : A -> B in E
+       ----------------
+       E |- f => A -> B  E |- expr => A
+       --------------------------------
+               E |- f expr => B
+    *)
+    | Ast.Call { fname = Ast.Ident { name }; args } ->
+        let sym = Sym.symbol name in
+        match Env.lookup_var_fun env sym with
+        | None -> raise Unimplemented
+        | Some (argstyp, rettyp) ->
+            let _typ = if List.length args <> List.length argstyp then
+              TAst.ErrorType
+            else
+              TAst.ErrorType
+            in
+              raise Unimplemented
+
 
 and infertype_lval env lvl =
   match lvl with
-  | _ -> raise Unimplemented
+  | Var (Ident { name }) ->
+      let sym = Sym.symbol name in
+      let typ =
+        match Env.lookup_var_fun env sym with
+        | Some (_, TAst.RetTyp typ) -> typ
+        | Some (_, TAst.Void)
+        | None ->
+            Env.insert_err env (UndefinedSymbol {name});
+            TAst.ErrorType
+      in
+      (TAst.Var {ident = Ident { sym }; tp = typ}, typ)
 
 (* checks that an expression has the required type tp by inferring the type and comparing it to tp. *)
 and typecheck_expr env expr typ =
   let texpr, intyp = infertype_expr env expr in
-
-  if intyp = TAst.ErrorType || typ <> intyp then
-    (* TODO: report error in env *)
-    (texpr, TAst.ErrorType)
+  if intyp = TAst.ErrorType || typ <> intyp then (
+      Env.insert_err env (TypeMismatch {expected = TAst.RetTyp typ; actual = TAst.RetTyp intyp});
+      (texpr, TAst.ErrorType)
+    )
   else
     (texpr, intyp)
 
@@ -120,21 +182,25 @@ let rec typecheck_statement env stm =
       match tp with
       | Some tp -> let _tbody, _typ = typecheck_expr env body TAst.Bool in (* TODO *)
           raise Unimplemented
-      | None -> let tbody, typ = infertype_expr env body in (
-          TAst.VarDeclStm { name = tident_of_ident name; tp = typ; body = tbody },
-          TAst.Bool
-        )
+      | None -> let _tbody, _typ = infertype_expr env body in
+          raise Unimplemented
     )
   | Ast.ExprStm { expr } -> raise Unimplemented
   | Ast.IfThenElseStm { cond; thbr; elbro } -> raise Unimplemented
-  | Ast.CompoundStm { stms } -> raise Unimplemented
+  | Ast.CompoundStm { stms } ->
+      let tstms, env = typecheck_statement_seq env stms in
+      (TAst.CompoundStm { stms = tstms }, env)
   | Ast.ReturnStm { ret } -> raise Unimplemented
 
-(* should use typecheck_statement to check the block of statements. *)
-and typecheck_statement_seq env stms = raise Unimplemented
+and typecheck_statement_seq (env : Env.environment) = function
+  | [] -> ([], env)
+  | stm :: stms ->
+      let tstm, env = typecheck_statement env stm in
+      let tstms, env = typecheck_statement_seq env stms in
+      (tstm :: tstms, env)
 
 (* the initial environment should include all the library functions, no local variables, and no errors. *)
-let initial_environment = raise Unimplemented
+let initial_environment = Env.make_env []
 
 (* let rec typecheck_binop env left op right = *)
 (*   let (texpr1, typ1) = typecheck_expr env left in *)
@@ -154,4 +220,4 @@ let initial_environment = raise Unimplemented
 (*   | _ -> raise Unimplemented *)
 
 (* should check that the program (sequence of statements) ends in a return statement and make sure that all statements are valid as described in the assignment. Should use typecheck_statement_seq. *)
-let typecheck_prog prg = raise Unimplemented
+let typecheck_prog prg = typecheck_statement_seq initial_environment prg
