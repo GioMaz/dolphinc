@@ -1,6 +1,7 @@
 module TAst = TypedAst
 module Sym = Symbol
 exception Unimplemented (* your code should eventually compile without this exception *)
+exception Unexpected
 
 let typecheck_typ = function
 | Ast.Int -> TAst.Int
@@ -34,7 +35,10 @@ let join typ1 typ2 typ =
   else
     typ
 
-(* should return a pair of a typed expression and its inferred type. you can/should use typecheck_expr inside infertype_expr. *)
+(*
+  Should return a pair of a typed expression and its inferred type. you can/should use typecheck_expr inside infertype_expr.
+  To see how bidirectional typechecking works: https://ncatlab.org/nlab/show/bidirectional+typechecking
+*)
 let rec infertype_expr env expr =
   match expr with
   | Ast.Integer { int } -> (TAst.Integer {int = int}, TAst.Int)
@@ -132,24 +136,25 @@ let rec infertype_expr env expr =
         )
 
     (*
-       f : A -> B in E
-       ----------------
-       E |- f => A -> B  E |- expr => A
+       E |- f => A -> B  E |- expr <= A
        --------------------------------
                E |- f expr => B
     *)
     | Ast.Call { fname = Ast.Ident { name }; args } ->
         let sym = Sym.symbol name in
         match Env.lookup_var_fun env sym with
-        | None -> raise Unimplemented
-        | Some (argstyp, rettyp) ->
-            let _typ = if List.length args <> List.length argstyp then
-              TAst.ErrorType
+        | Some (Env.Fun (FunTyp {ret; params})) -> (
+            if List.length args = List.length params then
+              let args = List.combine args params in
+              let _targs = List.map
+                (fun (arg, (TAst.Param {paramname; typ})) -> typecheck_expr env arg typ) args
+              in
+                raise Unimplemented
             else
-              TAst.ErrorType
-            in
               raise Unimplemented
-
+          )
+        | Some (Env.Var typ) -> raise Unimplemented (* TODO: type mismatch *)
+        | None -> raise Unimplemented (* TODO: not found *)
 
 and infertype_lval env lvl =
   match lvl with
@@ -157,11 +162,9 @@ and infertype_lval env lvl =
       let sym = Sym.symbol name in
       let typ =
         match Env.lookup_var_fun env sym with
-        | Some (_, TAst.RetTyp typ) -> typ
-        | Some (_, TAst.Void)
-        | None ->
-            Env.insert_err env (UndefinedSymbol {name});
-            TAst.ErrorType
+        | Some (Env.Var typ) -> typ
+        | Some (Env.Fun (FunTyp { ret; params })) -> raise Unimplemented (* TODO: type mismatch *)
+        | None -> raise Unimplemented (* TODO: not fund *)
       in
       (TAst.Var {ident = Ident { sym }; tp = typ}, typ)
 
@@ -174,6 +177,12 @@ and typecheck_expr env expr typ =
     )
   else
     (texpr, intyp)
+
+(* and typecheck_args env = function *)
+(*   | arg :: args, Param { paramname; typ }:: argtyps -> *)
+(*       let texpr, typ = typecheck_expr env arg typ in *)
+(*       (texpr, typ) :: typecheck_args env (args, argtyps) *)
+(*   | _, _ -> raise Unexpected *)
 
 (* should check the validity of a statement and produce the corresponding typed statement. Should use typecheck_expr and/or infertype_expr as necessary. *)
 let rec typecheck_statement env stm =
